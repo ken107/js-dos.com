@@ -63,8 +63,9 @@ function(a,b){jQuery.fn[b]=function(d){return d?this.bind(b,d):this.trigger(b)}}
       })(this));
     }
 
-    Dosbox.prototype.run = function(archiveUrl, executable) {
+    Dosbox.prototype.run = function(archiveUrl, executable, options) {
       return new Dosbox.Mount(this.module, archiveUrl, {
+        saveFiles: options.saveFiles,
         success: (function(_this) {
           return function() {
             var func, hide;
@@ -115,10 +116,33 @@ function(a,b){jQuery.fn[b]=function(d){return d?this.bind(b,d):this.trigger(b)}}
       });
     };
 
+    Dosbox.prototype.getSaveFiles = function(glob) {
+      var FS = this.module.FS;
+      var index = glob.lastIndexOf("/");
+      var path = ".";
+      if (index != -1) {
+        path = glob.slice(0, index);
+        glob = glob.slice(index +1);
+      }
+      var regex = new RegExp(glob.replace(/\./g, "\\.").replace(/\*/g, ".*"), "i");
+      return FS.readdir(path)
+        .filter(function(filename) {
+          return regex.test(filename);
+        })
+        .map(function(filename) {
+          var file = path + "/" + filename;
+          return {
+            file: file,
+            data: FS.readFile(file)
+          }
+        });
+    };
+
     Dosbox.prototype._jsdos_init = function(module, script, onload) {
       var Module;
       Module = module;
       eval(script);
+      Module.FS = FS;
       if (onload) {
         return onload(this);
       }
@@ -199,12 +223,36 @@ function(a,b){jQuery.fn[b]=function(d){return d?this.bind(b,d):this.trigger(b)}}
           return function(data) {
             var bytes;
             bytes = _this._toArray(data);
+            Promise.resolve(bytes)
+              .then(injectSaveFiles)
+              .then(mount);
+          };
+          function injectSaveFiles(bytes) {
+            if (options.saveFiles) {
+              if (typeof JSZip != "undefined") {
+                return JSZip.loadAsync(bytes)
+                  .then(function(zip) {
+                    options.saveFiles.forEach(function(item) {
+                      zip.file(item.file, item.data);
+                    });
+                    return zip.generateAsync({type: "uint8array"});
+                  });
+              } else {
+                typeof console !== "undefined" && console !== null ? typeof console.warn === "function" ? console.warn("Unable to inject save files - JSZip not found") : void 0 : void 0;
+                return bytes;
+              }
+            }
+            else {
+              return bytes;
+            }
+          }
+          function mount(bytes) {
             if (_this._mountZip(bytes)) {
               return options.success();
             } else {
               return typeof console !== "undefined" && console !== null ? typeof console.error === "function" ? console.error('Unable to mount', url) : void 0 : void 0;
             }
-          };
+          }
         })(this),
         progress: options.progress
       });
